@@ -1,0 +1,8 @@
+# Runtime deps for the bridge. The Cradlewise client is vendored under
+# cradlewise/ (extracted from pycradlewise, MIT) — so these are just its
+# dependencies, minus the MQTT/shadow telemetry path the bridge doesn't use.
+pycognito>=2024.5.1
+boto3>=1.34.0
+aiohttp>=3.9.0
+aiortc>=1.6.0
+av>=10.0.0

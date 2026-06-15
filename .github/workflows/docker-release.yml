@@ -1,0 +1,26 @@
+name: Docker Release
+
+# Publish images to GHCR:
+#   push to main    → :main + :sha-<sha>
+#   GitHub release  → :vX.Y.Z + :latest + :sha-<sha>  (+ provenance attestation)
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    uses: ljmerza/misc-actions/.github/workflows/docker-release.yml@v2
+    with:
+      image-name: ghcr.io/${{ github.repository_owner }}/cradlewise-rtsp-bridge
+    secrets: inherit

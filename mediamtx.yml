@@ -1,0 +1,12 @@
+# mediamtx config for the Cradlewise RTSP bridge.
+# The bridge publishes the crib feed into the `cradlewise` path; point your NVR at
+# rtsp://<host>:8554/cradlewise. Default RTSP listener is :8554.
+logLevel: info
+
+paths:
+  cradlewise:
+    # The bridge holds the single 24/7 Janus subscriber session and publishes
+    # here. mediamtx launches it at startup and restarts it if it exits (the
+    # bridge also self-supervises/reconnects internally).
+    runOnInit: python3 -u /app/bridge.py
+    runOnInitRestart: yes

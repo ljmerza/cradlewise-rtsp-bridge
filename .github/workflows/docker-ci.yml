@@ -1,0 +1,19 @@
+name: Docker CI
+
+# Build (and push a pr-<n> image to GHCR) on every pull request.
+on:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    permissions:
+      contents: read
+      packages: write
+    uses: ljmerza/misc-actions/.github/workflows/docker-ci.yml@v2
+    with:
+      image-name: ghcr.io/${{ github.repository_owner }}/cradlewise-rtsp-bridge
+    secrets: inherit

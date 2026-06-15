@@ -1,0 +1,16 @@
+name: Cleanup PR Image
+
+# Delete the pr-<n> GHCR image when its pull request is closed.
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  cleanup:
+    permissions:
+      contents: read
+      packages: write
+    uses: ljmerza/misc-actions/.github/workflows/cleanup-pr-image.yml@v2
+    with:
+      package-name: cradlewise-rtsp-bridge
+    secrets: inherit
