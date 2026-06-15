@@ -119,6 +119,29 @@ async def _setup() -> tuple[CradlewiseClient, object, str]:
     return client, cradle, device_id
 
 
+def _pin_encoder_size(recorder: MediaRecorder, width: int, height: int) -> None:
+    """Fix the video encoder's output size to the source before recording starts.
+
+    aiortc's MediaRecorder only sets the libx264 stream size from its first frame
+    inside the recording loop; for format="rtsp" the muxer can open the encoder at
+    libx264's 640x480 default first and scale the real source down (and the
+    outcome is racy across restarts). Setting width/height up front — and marking
+    the context started so the loop doesn't re-adjust — makes the published RTSP
+    carry the true resolution deterministically.
+    """
+    tracks = getattr(recorder, "_MediaRecorder__tracks", None)
+    if not tracks:
+        _LOG.warning("Could not pin encoder size (aiortc internal layout changed)")
+        return
+    for ctx in tracks.values():
+        stream = ctx.stream
+        if getattr(stream, "type", None) == "video":
+            stream.width = width
+            stream.height = height
+            stream.pix_fmt = "yuv420p"
+            ctx.started = True
+
+
 async def _stream_session(client: CradlewiseClient, cradle_id: str, device_id: str) -> None:
     """One video session: subscribe to the crib and publish RTSP until it ends.
 
@@ -131,15 +154,25 @@ async def _stream_session(client: CradlewiseClient, cradle_id: str, device_id: s
         track = await video.start(timeout=START_TIMEOUT)
         relay = MediaRelay()
 
+        # Peek the first frame to learn the true source resolution. For
+        # format="rtsp", aiortc's MediaRecorder lets libx264 open at its 640x480
+        # default before its loop adjusts to the first frame, so the RTSP header
+        # locks 640x480 and the real source gets scaled down (racy across
+        # restarts). Pin the encoder size up front to avoid that.
+        probe = relay.subscribe(track)
+        first = await asyncio.wait_for(probe.recv(), timeout=START_TIMEOUT)
+        src_w, src_h = first.width, first.height
+
         recorder = MediaRecorder(RTSP_URL, format="rtsp", options={"rtsp_transport": "tcp"})
         recorder.addTrack(relay.subscribe(track))
         if WANT_AUDIO and video.audio_track is not None:
             recorder.addTrack(relay.subscribe(video.audio_track))
-            _LOG.info("Publishing video + audio → %s", RTSP_URL)
+            _LOG.info("Publishing video %dx%d + audio → %s", src_w, src_h, RTSP_URL)
         else:
             if WANT_AUDIO:
                 _LOG.info("Crib published no audio track; video only")
-            _LOG.info("Publishing video → %s", RTSP_URL)
+            _LOG.info("Publishing video %dx%d → %s", src_w, src_h, RTSP_URL)
+        _pin_encoder_size(recorder, src_w, src_h)
         await recorder.start()
 
         # Block until the upstream feed ends or stalls. We watch our own relay
