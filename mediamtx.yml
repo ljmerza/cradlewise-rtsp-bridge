@@ -3,6 +3,11 @@
 # rtsp://<host>:8554/cradlewise. Default RTSP listener is :8554.
 logLevel: info
 
+# Force RTSP-over-TCP. Behind Docker NAT, UDP RTP/RTCP (8000/8001) doesn't reach
+# remote clients, so TCP-interleaved media on the single 8554 connection is what
+# lets remote viewers (VLC) and NVRs pull reliably.
+protocols: [tcp]
+
 paths:
   cradlewise:
     # The bridge holds the single 24/7 Janus subscriber session and publishes
