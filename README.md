@@ -1,19 +1,20 @@
 # cradlewise-rtsp-bridge
 
-Turn a [Cradlewise Smart Crib](https://cradlewise.com)'s live camera into a plain
-**RTSP stream** any NVR (Frigate, Blue Iris, Scrypted, go2rtc, …) can record.
+Turn every [Cradlewise Smart Crib](https://cradlewise.com) on your account into a
+plain **RTSP stream** any NVR (Frigate, Blue Iris, Scrypted, go2rtc, …) can record.
 
 The crib has **no local video stream** — its live feed is a [Janus](https://janus.conf.meetecho.com/)
 *videoroom* published to Cradlewise's cloud SFU and consumed over WebRTC. This
-service holds a single, always-on WebRTC subscriber session and re-publishes the
-received **H.264 video (+ audio)** as local RTSP via a co-located
+service discovers every crib on the account, holds one always-on WebRTC
+subscriber session per crib, and re-publishes each received **H.264 video
+(+ audio)** as its own local RTSP path via a co-located
 [mediamtx](https://github.com/bluenviron/mediamtx):
 
 ```
-crib → Cradlewise cloud Janus (SFU)
-     → cradlewise-rtsp-bridge  (WebRTC subscriber → mediamtx)
-     → rtsp://<host>:8554/cradlewise
-     → your NVR (record / view)
+crib(s) → Cradlewise cloud Janus (SFU)
+        → cradlewise-rtsp-bridge  (one WebRTC subscriber per crib → mediamtx)
+        → rtsp://<host>:8554/cradlewise_<baby_name>
+        → your NVR (record / view)
 ```
 
 Janus is an SFU, so the crib only ever uploads one feed no matter how many
@@ -25,8 +26,8 @@ clients watch — this bridge is just one more subscriber alongside the app.
 cp .env.example .env      # fill in CRADLEWISE_EMAIL / CRADLEWISE_PASSWORD
 docker compose -f docker-compose.example.yml up -d
 docker compose -f docker-compose.example.yml logs -f
-# then point your NVR at:
-ffprobe rtsp://localhost:8554/cradlewise
+# the logs print each crib's path; then point your NVR at e.g.:
+ffprobe rtsp://localhost:8554/cradlewise_<baby_name>
 ```
 
 Or pull the prebuilt image directly:
@@ -47,10 +48,9 @@ Images are published to `ghcr.io/ljmerza/cradlewise-rtsp-bridge`
 |---|---|---|
 | `CRADLEWISE_EMAIL` | — | **Required.** Cradlewise account email. |
 | `CRADLEWISE_PASSWORD` | — | **Required.** Cradlewise account password. |
-| `CRADLEWISE_CRADLE` | *(first)* | Select a crib by `cradle_id` or baby name. |
 | `CRADLEWISE_DEVICE_NAME` | `cradlewise-rtsp-bridge` | Device name used to provision a registered device id (see note). |
-| `CRADLEWISE_AUDIO` | `1` | Include the crib's audio track (`1`/`0`). |
-| `RTSP_URL` | `rtsp://127.0.0.1:8554/cradlewise` | Where the bridge publishes (must match the mediamtx path). |
+| `CRADLEWISE_AUDIO` | `1` | Include each crib's audio track (`1`/`0`). |
+| `RTSP_BASE` | `rtsp://127.0.0.1:8554` | RTSP server base; each crib publishes to `<RTSP_BASE>/cradlewise_<baby_name>`. |
 | `CRADLEWISE_START_TIMEOUT` | `120` | Seconds to wait for the first video track. |
 | `CRADLEWISE_STALL_TIMEOUT` | `30` | Reconnect if no frame arrives for this long. |
 | `LOG_LEVEL` | `INFO` | Python log level. |
@@ -58,12 +58,12 @@ Images are published to `ghcr.io/ljmerza/cradlewise-rtsp-bridge`
 ## How it works
 
 `bridge.py` runs the full Cradlewise control-plane handshake (Cognito auth → REST
-→ device provisioning → signed Janus WebSocket), subscribes to the crib's
-videoroom feed with [aiortc](https://github.com/aiortc/aiortc), and pipes the
-received tracks into mediamtx as RTSP. mediamtx launches and supervises the
-publisher (`runOnInit`), and the bridge additionally self-reconnects with
-backoff. The Cradlewise client lives in the vendored [`cradlewise/`](cradlewise)
-package.
+→ device provisioning), discovers every crib on the account, and for each holds a
+signed Janus WebSocket subscription via [aiortc](https://github.com/aiortc/aiortc),
+piping its tracks into mediamtx as a separate RTSP path. mediamtx launches and
+supervises the publisher process (`runOnInit`), and each per-crib session
+self-reconnects with backoff. The Cradlewise client lives in the vendored
+[`cradlewise/`](cradlewise) package.
 
 ## Notes & caveats
 
