@@ -178,9 +178,19 @@ async def _stream_session(
         # default before its loop adjusts to the first frame, so the RTSP header
         # locks 640x480 and the real source gets scaled down (racy across
         # restarts). Pin the encoder size up front to avoid that.
+        # Stop the probe once we have the first frame. MediaRelay.subscribe()
+        # defaults to buffered=True (an unbounded asyncio.Queue), and the relay
+        # worker pushes every decoded frame to every subscribed proxy whether or
+        # not it's ever read. Leaving the probe open after this one recv() would
+        # grow its queue at full frame rate for the whole 24/7 session (a ~GB/min
+        # leak). probe.stop() only discards this proxy; it doesn't cancel the
+        # source worker, so the recorder/monitor subscriptions keep streaming.
         probe = relay.subscribe(track)
-        first = await asyncio.wait_for(probe.recv(), timeout=START_TIMEOUT)
-        src_w, src_h = first.width, first.height
+        try:
+            first = await asyncio.wait_for(probe.recv(), timeout=START_TIMEOUT)
+            src_w, src_h = first.width, first.height
+        finally:
+            probe.stop()
 
         recorder = MediaRecorder(rtsp_url, format="rtsp", options={"rtsp_transport": "tcp"})
         recorder.addTrack(relay.subscribe(track))
