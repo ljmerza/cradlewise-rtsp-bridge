@@ -50,10 +50,34 @@ Images are published to `ghcr.io/ljmerza/cradlewise-rtsp-bridge`
 | `CRADLEWISE_PASSWORD` | — | **Required.** Cradlewise account password. |
 | `CRADLEWISE_DEVICE_NAME` | `cradlewise-rtsp-bridge` | Device name used to provision a registered device id (see note). |
 | `CRADLEWISE_AUDIO` | `1` | Include each crib's audio track (`1`/`0`). |
+| `CRADLEWISE_TIMESTAMP` | *(off)* | Burn a wall-clock timestamp into the video. The value *is* the position — see below. |
+| `TZ` | `UTC` | Timezone for the burnt-in timestamp. |
 | `RTSP_BASE` | `rtsp://127.0.0.1:8554` | RTSP server base; each crib publishes to `<RTSP_BASE>/cradlewise_<baby_name>`. |
 | `CRADLEWISE_START_TIMEOUT` | `120` | Seconds to wait for the first video track. |
 | `CRADLEWISE_STALL_TIMEOUT` | `30` | Reconnect if no frame arrives for this long. |
 | `LOG_LEVEL` | `INFO` | Python log level. |
+
+### Burnt-in timestamp
+
+`CRADLEWISE_TIMESTAMP` both enables the overlay and places it — one variable, no
+separate on/off switch. Leave it unset (or `0`/`false`/`no`/`off`) and no
+timestamp is drawn at all:
+
+| Value | Result |
+|---|---|
+| unset, `0`, `false`, `no`, `off` | No overlay (default). |
+| `top-left`, `top-center`, `top-right`, `bottom-left`, `bottom-center`, `bottom-right` | Overlay in that corner. `tl`/`tc`/`tr`/`bl`/`bc`/`br` and `_` separators also work. |
+| `1`, `true`, `yes`, `on` | Overlay at `bottom-left`. |
+
+The clock is the container's **local** time, so set `TZ` as well or it stamps
+UTC. Format is `YYYY-MM-DD HH:MM:SS`; the font auto-scales to the source height
+(~1/30th of it) and is drawn white with a dark outline so it reads on both a lit
+room and an IR night frame.
+
+Cost is small: the text is rasterised once per second, then blitted straight into
+the frame's luma plane (no RGB round-trip). Measured at **~4 ms/frame at
+1080p** on one core — under 6% of a core at 15 fps. If drawing ever fails it logs
+once and passes frames through unstamped rather than dropping the stream.
 
 ## How it works
 

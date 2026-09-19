@@ -5,8 +5,9 @@ FROM python:3.13-slim
 
 # ffmpeg: PyAV/aiortc media stack + the MediaRecorder RTSP muxer.
 # curl/ca-certificates: fetch the mediamtx release.
+# fonts-dejavu-core: glyphs for the optional CRADLEWISE_TIMESTAMP overlay.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg curl ca-certificates \
+        ffmpeg curl ca-certificates fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # mediamtx static binary, arch-matched to the build platform (buildx sets
