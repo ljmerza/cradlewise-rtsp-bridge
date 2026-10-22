@@ -1,7 +1,10 @@
 # Standalone deployment of the Cradlewise → RTSP bridge.
-# Copy .env.example to .env and fill in your Cradlewise credentials, then:
+# Copy .env.example to .env and fill in your Cradlewise credentials AND the RTSP
+# read login (RTSP_READ_USER / RTSP_READ_PASSWORD), then:
 #   docker compose -f docker-compose.example.yml up -d
-# Point your NVR at  rtsp://<this-host>:8554/cradlewise
+# Point your NVR at  rtsp://<read user>:<read password>@<this-host>:8554/cradlewise_<baby_name>
+# (URL-encode special characters in the password). Without RTSP_READ_* the
+# container refuses to start, unless you set RTSP_ALLOW_ANONYMOUS=true.
 services:
   cradlewise-rtsp-bridge:
     image: ghcr.io/ljmerza/cradlewise-rtsp-bridge:latest
@@ -11,9 +14,9 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      # RTSP. NOTE: this exposes the (unauthenticated) crib feed on your LAN.
-      # If your NVR runs as another container, prefer a shared docker network
-      # over a published port.
+      # RTSP. Password-protected (RTSP_READ_USER / RTSP_READ_PASSWORD) but sent
+      # unencrypted, so don't expose it beyond a trusted LAN/VPN. If your NVR runs
+      # as another container, prefer a shared docker network over a published port.
       - "8554:8554"
     volumes:
       # Caches the crib app-config (Cognito pool / API endpoints extracted once).

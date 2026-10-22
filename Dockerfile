@@ -30,6 +30,9 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 WORKDIR /app
 COPY cradlewise/ /app/cradlewise/
-COPY bridge.py mediamtx.yml /app/
+COPY bridge.py mediamtx.yml rtsp_auth.py /app/
 
-CMD ["mediamtx", "/app/mediamtx.yml"]
+# rtsp_auth.py validates the RTSP_* auth env vars (refusing to start without read
+# credentials unless RTSP_ALLOW_ANONYMOUS=true), renders them into mediamtx's
+# internal-auth config and exec()s mediamtx on it.
+CMD ["python3", "-u", "/app/rtsp_auth.py"]

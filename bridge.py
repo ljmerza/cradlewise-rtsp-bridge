@@ -60,6 +60,7 @@ from cradlewise import (
     get_app_config,
 )
 from cradlewise.certs import provision_device
+from rtsp_auth import RedactingFormatter, publish_url
 
 _LOG = logging.getLogger("cradlewise-bridge")
 
@@ -75,6 +76,10 @@ DEVICE_NAME = (
 )
 # Base RTSP target inside the container; each crib is published to
 # "<RTSP_BASE>/cradlewise_<baby_name>" (the mediamtx all_others path accepts any).
+# Publishing is authenticated: rtsp_auth.py (the container entrypoint) puts the
+# localhost-only publisher credentials in RTSP_PUBLISH_USER/_PASSWORD, which this
+# process inherits from mediamtx. They're added to the URL only where the
+# recorder opens it (rtsp_auth.publish_url); every logged URL stays credential-free.
 RTSP_BASE = os.getenv("RTSP_BASE", "rtsp://127.0.0.1:8554").rstrip("/")
 CACHE_DIR = Path(os.getenv("CRADLEWISE_CACHE", "/cache"))
 WANT_AUDIO = os.getenv("CRADLEWISE_AUDIO", "1").lower() not in ("0", "false", "no")
@@ -378,7 +383,9 @@ async def _stream_session(
         finally:
             probe.stop()
 
-        recorder = MediaRecorder(rtsp_url, format="rtsp", options={"rtsp_transport": "tcp"})
+        recorder = MediaRecorder(
+            publish_url(rtsp_url), format="rtsp", options={"rtsp_transport": "tcp"}
+        )
         video_track = relay.subscribe(track)
         if TIMESTAMP_POSITION is not None:
             # Stamp between the relay and the recorder, so only the published
@@ -460,10 +467,11 @@ async def _supervise_cradle(
 
 
 async def main() -> None:
-    logging.basicConfig(
-        level=os.getenv("LOG_LEVEL", "INFO").upper(),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    log_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format=log_format)
+    # Scrub RTSP credentials from every line (incl. tracebacks / libav messages).
+    for handler in logging.getLogger().handlers:
+        handler.setFormatter(RedactingFormatter(log_format))
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
