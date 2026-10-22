@@ -13,7 +13,7 @@ subscriber session per crib, and re-publishes each received **H.264 video
 ```
 crib(s) → Cradlewise cloud Janus (SFU)
         → cradlewise-rtsp-bridge  (one WebRTC subscriber per crib → mediamtx)
-        → rtsp://<host>:8554/cradlewise_<baby_name>
+        → rtsp://<user>:<password>@<host>:8554/cradlewise_<baby_name>
         → your NVR (record / view)
 ```
 
@@ -24,10 +24,11 @@ clients watch — this bridge is just one more subscriber alongside the app.
 
 ```bash
 cp .env.example .env      # fill in CRADLEWISE_EMAIL / CRADLEWISE_PASSWORD
+                          # and RTSP_READ_USER / RTSP_READ_PASSWORD (required, see below)
 docker compose -f docker-compose.example.yml up -d
 docker compose -f docker-compose.example.yml logs -f
 # the logs print each crib's path; then point your NVR at e.g.:
-ffprobe rtsp://localhost:8554/cradlewise_<baby_name>
+ffprobe rtsp://<RTSP_READ_USER>:<RTSP_READ_PASSWORD>@localhost:8554/cradlewise_<baby_name>
 ```
 
 Or pull the prebuilt image directly:
@@ -35,6 +36,7 @@ Or pull the prebuilt image directly:
 ```bash
 docker run -d --name cradlewise-rtsp-bridge -p 8554:8554 \
   -e CRADLEWISE_EMAIL=you@example.com -e CRADLEWISE_PASSWORD=... \
+  -e RTSP_READ_USER=viewer -e RTSP_READ_PASSWORD=choose-a-long-password \
   -v "$PWD/cache:/cache" \
   ghcr.io/ljmerza/cradlewise-rtsp-bridge:latest
 ```
@@ -52,10 +54,55 @@ Images are published to `ghcr.io/ljmerza/cradlewise-rtsp-bridge`
 | `CRADLEWISE_AUDIO` | `1` | Include each crib's audio track (`1`/`0`). |
 | `CRADLEWISE_TIMESTAMP` | *(off)* | Burn a wall-clock timestamp into the video. The value *is* the position — see below. |
 | `TZ` | `UTC` | Timezone for the burnt-in timestamp. |
-| `RTSP_BASE` | `rtsp://127.0.0.1:8554` | RTSP server base; each crib publishes to `<RTSP_BASE>/cradlewise_<baby_name>`. |
+| `RTSP_READ_USER` | — | **Required** (unless `RTSP_ALLOW_ANONYMOUS=true`). Login that viewers/NVRs use to read the streams. |
+| `RTSP_READ_PASSWORD` | — | **Required** (same rule). 8+ chars, no `:` or control characters. |
+| `RTSP_PUBLISH_USER` | `bridge` | Login the bridge itself uses to publish (localhost only). |
+| `RTSP_PUBLISH_PASSWORD` | *(random per start)* | Publish password. Leave unset: a random one is generated at each start and handed to the bridge. |
+| `RTSP_ALLOW_ANONYMOUS` | *(off)* | `true` serves the streams to anyone, no password. Logs a loud warning on every start. Mutually exclusive with `RTSP_READ_*`. |
+| `RTSP_BASE` | `rtsp://127.0.0.1:8554` | RTSP server base; each crib publishes to `<RTSP_BASE>/cradlewise_<baby_name>`. Don't put credentials in it. |
 | `CRADLEWISE_START_TIMEOUT` | `120` | Seconds to wait for the first video track. |
 | `CRADLEWISE_STALL_TIMEOUT` | `30` | Reconnect if no frame arrives for this long. |
 | `LOG_LEVEL` | `INFO` | Python log level. |
+
+### RTSP authentication
+
+The RTSP server requires a login. Two separate principals are created from the
+environment (mediamtx internal auth, passwords stored as SHA-256 hashes in a
+private `0600` copy of the config rendered at startup by `rtsp_auth.py`):
+
+| Principal | Env | May | From |
+|---|---|---|---|
+| **read** | `RTSP_READ_USER` / `RTSP_READ_PASSWORD` | read any path | any address |
+| **publish** | `RTSP_PUBLISH_USER` / `RTSP_PUBLISH_PASSWORD` | publish any path | `127.0.0.1` / `::1` only (the bridge, inside the container) |
+
+Nobody is granted the control API, metrics, pprof or playback actions, and those
+endpoints are switched off in `mediamtx.yml`. Passwords are never logged (log
+lines and tracebacks are scrubbed, and logged RTSP URLs never contain them).
+
+**Consumers must now include the read login in the URL:**
+
+```
+rtsp://<RTSP_READ_USER>:<RTSP_READ_PASSWORD>@<host>:8554/cradlewise_<baby_name>
+```
+
+Percent-encode special characters in the password (`@` -> `%40`, `/` -> `%2F`,
+`#` -> `%23`, `?` -> `%3F`, `%` -> `%25`, space -> `%20`). Easiest is a password with
+only letters and digits, e.g. `openssl rand -hex 16`. Also keep `$` and `#` out of
+passwords you put in a compose `.env` file, since compose may interpolate them.
+`:` is not allowed in passwords (mediamtx rejects such logins).
+
+**Startup rule.** If `RTSP_READ_USER`/`RTSP_READ_PASSWORD` are not set the
+container logs an error and exits (code 2) instead of serving an open stream. To
+keep serving without a password, say so explicitly with `RTSP_ALLOW_ANONYMOUS=true`;
+read is then open to everyone, while publishing stays localhost-only and password
+protected. Combining it with `RTSP_READ_*` is rejected as ambiguous.
+
+**Limits.** RTSP here uses HTTP Basic auth (required for hashed passwords) over
+plain TCP, so a passive sniffer on the path can read both the password and the
+video. Keep port 8554 on a trusted LAN/VPN; this stops casual and accidental
+viewing, not an on-path attacker. Overriding the container command so mediamtx
+starts directly on `mediamtx.yml` is safe but useless: that file has no users, so
+everything (including the bridge's publish) is denied.
 
 ### Burnt-in timestamp
 
@@ -84,9 +131,11 @@ once and passes frames through unstamped rather than dropping the stream.
 `bridge.py` runs the full Cradlewise control-plane handshake (Cognito auth → REST
 → device provisioning), discovers every crib on the account, and for each holds a
 signed Janus WebSocket subscription via [aiortc](https://github.com/aiortc/aiortc),
-piping its tracks into mediamtx as a separate RTSP path. mediamtx launches and
-supervises the publisher process (`runOnInit`), and each per-crib session
-self-reconnects with backoff. The Cradlewise client lives in the vendored
+piping its tracks into mediamtx as a separate RTSP path. The container starts
+`rtsp_auth.py`, which renders the auth config and `exec`s mediamtx; mediamtx then
+launches and supervises the publisher process (`runOnInit`, inheriting the
+publish credentials from the environment) which publishes over `127.0.0.1`, and
+each per-crib session self-reconnects with backoff. The Cradlewise client lives in the vendored
 [`cradlewise/`](cradlewise) package.
 
 ## Notes & caveats

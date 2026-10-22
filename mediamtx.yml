@@ -5,6 +5,25 @@
 # your NVR at rtsp://<host>:8554/<that path>. Default RTSP listener is :8554.
 logLevel: info
 
+# ── Authentication ───────────────────────────────────────────────────────────
+# The container entrypoint (rtsp_auth.py) renders the users below from the
+# RTSP_READ_* / RTSP_PUBLISH_* / RTSP_ALLOW_ANONYMOUS env vars into a private
+# copy of this file and starts mediamtx on that copy. As written here the list is
+# EMPTY on purpose: if mediamtx is ever started directly on this file, nobody can
+# read, publish or use the API (fail closed) instead of falling back to
+# mediamtx's built-in "any user may publish/read" default.
+authMethod: internal
+authInternalUsers: []
+
+# Control API, metrics, pprof and playback are off. Even if you turn one on, no
+# user is granted its action (api/metrics/pprof/playback), so it stays unusable
+# until you add a user for it deliberately. (mediamtx's default would allow API,
+# metrics and pprof without a password from 127.0.0.1.)
+api: no
+metrics: no
+pprof: no
+playback: no
+
 # Force RTSP-over-TCP. Behind Docker NAT, UDP RTP/RTCP (8000/8001) doesn't reach
 # remote clients, so TCP-interleaved media on the single 8554 connection is what
 # lets remote viewers (VLC) and NVRs pull reliably.
